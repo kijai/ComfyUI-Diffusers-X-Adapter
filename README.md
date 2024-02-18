@@ -1,3 +1,7 @@
+# ComfyUI wrapper node for X-Adapter diffusers implementation.
+
+This is meant for testing only, with the ability to use same models and python env as ComfyUI, it is NOT a proper ComfyUI implementation!
+
 # X-Adapter
 
 This repository is the official implementation of [X-Adapter](https://arxiv.org/abs/2312.02238).
@@ -59,7 +63,7 @@ Installing [xformers](https://github.com/facebookresearch/xformers) is highly re
 
 ### Checkpoint
 
-Models can be downloaded from our [Hugging Face page](https://huggingface.co/Lingmin-Ran/X-Adapter). Put the checkpoint in folder `./checkpoint/X-Adapter`.
+Models can be downloaded from our [HuggingFace page](https://huggingface.co/Lingmin-Ran/X-Adapter). Put the checkpoint in folder `./checkpoint/X-Adapter`.
 
 ## Usage
 
@@ -67,7 +71,7 @@ After preparing all checkpoints, we can run inference code using different plugi
 
 ### Controlnet Inference
 
-Set `--controlnet_canny_path` or `--controlnet_depth_path` to ControlNet's path in the bash script. The default value is its Hugging Face model card. 
+Set `--controlnet_canny_path` or `--controlnet_depth_path` to ControlNet's path in the bash script. The default value is its huggingface model card. 
 
     sh ./bash_scripts/canny_controlnet_inference.sh
     sh ./bash_scripts/depth_controlnet_inference.sh
@@ -80,7 +84,7 @@ Set `--lora_model_path` to LoRA's checkpoint in the bash script. In this example
 
 ### Controlnet-Tile Inference
 
-Set `--controlnet_tile_path` to ControlNet-tile's path in the bash script. The default value is its Hugging Face model card. 
+Set `--controlnet_tile_path` to ControlNet-tile's path in the bash script. The default value is its huggingface model card. 
 
     sh ./bash_scripts/controlnet_tile_inference.sh
 

@@ -1,0 +1,10 @@
+wandb/
+*debug*
+debugs/
+outputs/
+__pycache__/
+checkpoints/*
+*.ipynb
+*.safetensors
+*.ckpt
+*.bak
