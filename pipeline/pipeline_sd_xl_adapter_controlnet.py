@@ -27,7 +27,7 @@ from diffusers.image_processor import VaeImageProcessor
 from diffusers.loaders import FromSingleFileMixin, LoraLoaderMixin, TextualInversionLoaderMixin
 # from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.models import AutoencoderKL, ControlNetModel
-from model.unet_adapter import UNet2DConditionModel
+from ..xadapter.model.unet_adapter import UNet2DConditionModel
 
 from diffusers.models.attention_processor import (
     AttnProcessor2_0,
@@ -41,17 +41,18 @@ from diffusers.utils import (
     is_accelerate_version,
     is_invisible_watermark_available,
     logging,
-    randn_tensor,
     replace_example_docstring,
 )
+from diffusers.utils.torch_utils import randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipelineOutput
-from model.adapter import Adapter_XL
+from ..xadapter.model.adapter import Adapter_XL
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 
 if is_invisible_watermark_available():
     from diffusers.pipelines.stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
 
+import comfy.utils
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -977,7 +978,7 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
             controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
 
         latents_sd1_5_prior = latents_sd1_5.clone()
-
+        pbar = comfy.utils.ProgressBar(num_inference_steps_sd1_5)
         with self.progress_bar(total=num_inference_steps_sd1_5) as progress_bar:
             for i, t in enumerate(timesteps_sd1_5):
                 #################### SD1.5 forward ####################
@@ -1051,6 +1052,7 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                 # call the callback, if provided
                 if i == len(timesteps_sd1_5) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler_sd1_5.order == 0):
                     progress_bar.update()
+                    pbar.update(1)
 
 
         add_noise = True if denoising_start is None else False
@@ -1154,42 +1156,7 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
 
                     # predict the noise residual
                     added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
-                    # if adapter_ablation:
-                    #     noise_pred = self.unet(
-                    #         latent_model_input,
-                    #         t,
-                    #         encoder_hidden_states=prompt_embeds,
-                    #         cross_attention_kwargs=cross_attention_kwargs,
-                    #         added_cond_kwargs=added_cond_kwargs,
-                    #         return_dict=False,
-                    #     )[0]
-                    # else:
-                    #     # noise_pred = self.unet(
-                    #     #     latent_model_input,
-                    #     #     t,
-                    #     #     encoder_hidden_states=prompt_embeds,
-                    #     #     cross_attention_kwargs=cross_attention_kwargs,
-                    #     #     added_cond_kwargs=added_cond_kwargs,
-                    #     #     up_block_additional_residual=up_block_additional_residual,
-                    #     #     down_bridge_residuals=down_bridge_residuals,
-                    #     #     return_dict=False,
-                    #     #     fusion_guidance_scale=fusion_guidance_scale,
-                    #     #     fusion_type=fusion_type,
-                    #     #     adapter=self.adapter if fusion_type == 'SPADE' else None
-                    #     # )[0]
-                    #     noise_pred = self.unet(
-                    #         latent_model_input,
-                    #         t,
-                    #         encoder_hidden_states=prompt_embeds,
-                    #         cross_attention_kwargs=cross_attention_kwargs,
-                    #         added_cond_kwargs=added_cond_kwargs,
-                    #         up_block_additional_residual=up_block_additional_residual,
-                    #         down_bridge_residuals=down_bridge_residuals,
-                    #         return_dict=False,
-                    #         fusion_guidance_scale=fusion_guidance_scale,
-                    #         fusion_type='ADD',
-                    #         adapter=None
-                    #     )[0]
+                    
                     noise_pred = self.unet(
                             latent_model_input,
                             t,
@@ -1802,7 +1769,7 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
             t_start = max(num_inference_steps - init_timestep, 0)
         else:
             t_start = 0
-
+        self.scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = self.scheduler.timesteps[t_start * self.scheduler.order :]
 
         # Strength is irrelevant if we directly request a timestep to start at;
@@ -1815,6 +1782,7 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                 )
             )
             timesteps = list(filter(lambda ts: ts < discrete_timestep_cutoff, timesteps))
+           
             return torch.tensor(timesteps), len(timesteps)
 
         return timesteps, num_inference_steps - t_start

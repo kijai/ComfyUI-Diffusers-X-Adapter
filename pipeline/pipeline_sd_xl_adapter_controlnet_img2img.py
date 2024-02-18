@@ -27,7 +27,7 @@ from diffusers.image_processor import VaeImageProcessor
 from diffusers.loaders import FromSingleFileMixin, LoraLoaderMixin, TextualInversionLoaderMixin
 # from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.models import AutoencoderKL, ControlNetModel
-from model.unet_adapter import UNet2DConditionModel
+from ..xadapter.model.unet_adapter import UNet2DConditionModel
 
 from diffusers.models.attention_processor import (
     AttnProcessor2_0,
@@ -41,12 +41,12 @@ from diffusers.utils import (
     is_accelerate_version,
     is_invisible_watermark_available,
     logging,
-    randn_tensor,
     replace_example_docstring,
 )
+from diffusers.utils.torch_utils import randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipelineOutput
-from model.adapter import Adapter_XL
+from ..xadapter.model.adapter import Adapter_XL
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 
 if is_invisible_watermark_available():
@@ -1232,14 +1232,15 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
             latents = latents.to(next(iter(self.vae.post_quant_conv.parameters())).dtype)
 
         if not output_type == "latent":
+            print("LATENTS SHAPE BEFORE DECODE",latents.shape)
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]
         else:
             image = latents
             return StableDiffusionXLPipelineOutput(images=image)
 
         # apply watermark if available
-        if self.watermark is not None:
-            image = self.watermark.apply_watermark(image)
+        #if self.watermark is not None:
+        #    image = self.watermark.apply_watermark(image)
 
         image = self.image_processor.postprocess(image, output_type=output_type)
 
@@ -1914,14 +1915,20 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
 
     def sd1_5_add_noise(self, init_latents, timestep, generator, device, dtype):
         shape = init_latents.shape
+        print("init_latents shape: ",shape)
         noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+        print("noise shape: ",noise.shape)
         # get latents
+        print("timestep: ",timestep)
+        print("scheduler: ",type(self.scheduler))
+        print("scheduler config: ",self.scheduler.config)
         init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
-
+        print("noised init_latents shape: ",init_latents.shape)
         image = self.vae_sd1_5.decode(init_latents / self.vae_sd1_5.config.scaling_factor, return_dict=False)[0]
+        print(image.shape)
         do_denormalize = [True] * image.shape[0]
         image = self.image_processor_sd1_5.postprocess(image, output_type='pil', do_denormalize=do_denormalize)[0]
-        # image.save(f'./test_img/noisy_image_sd1_5_{int(timestep)}.jpg')
+        #image.save(f'noisy_image_sd1_5_{int(timestep)}.jpg')
 
         return init_latents
 
