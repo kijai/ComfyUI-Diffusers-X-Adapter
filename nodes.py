@@ -35,21 +35,17 @@ class Diffusers_X_Adapter:
                 {
                 "image" : ("IMAGE",),
                 "sd_1_5_checkpoint": (folder_paths.get_filename_list("checkpoints"), ),
-                "sdxl_checkpoint": (folder_paths.get_filename_list("checkpoints"), ),
-                "controlnet_name": (folder_paths.get_filename_list("controlnet"), ), 
-            #     "scheduler": (
-            # [   
-            #     'DDIMScheduler',
-            #     'DDPMScheduler',
-            # ], {
-            #    "default": 'DDIMScheduler'
-            # }),
-               
                 "width_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
                 "height_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
+                "prompt_sd1_5": ("STRING", {"multiline": True, "default": "positive prompt sd1_5",}),
+
+                "sdxl_checkpoint": (folder_paths.get_filename_list("checkpoints"), ),
                 "width_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
                 "height_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
-                "prompt": ("STRING", {"multiline": True, "default": "positive",}),
+                "prompt_sdxl": ("STRING", {"multiline": True, "default": "positive prompt sdxl",}),
+
+                "controlnet_name": (folder_paths.get_filename_list("controlnet"), ), 
+                
                 "negative_prompt": ("STRING", {"multiline": True, "default": "negative",}),
                 "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 4096, "step": 1}),
@@ -69,7 +65,7 @@ class Diffusers_X_Adapter:
 
     CATEGORY = "AD_MotionDirector"
 
-    def load_checkpoint(self, image, prompt, negative_prompt, use_xformers, sd_1_5_checkpoint, sdxl_checkpoint, 
+    def load_checkpoint(self, image, prompt_sdxl, prompt_sd1_5, negative_prompt, use_xformers, sd_1_5_checkpoint, sdxl_checkpoint, 
                         controlnet_name, seed, steps, cfg, width_sd1_5, height_sd1_5, width_sdxl, height_sdxl,
                         adapter_condition_scale, adapter_guidance_start, controlnet_condition_scale, source_image=None):
         torch.manual_seed(seed)
@@ -244,11 +240,10 @@ class Diffusers_X_Adapter:
         #pipe.unet.to(device=device, dtype=dtype, memory_format=torch.channels_last)
         iter_num = 1
 
-        if source_image is not None:
-            
+        if source_image is not None:     
             for i in range(iter_num):
                 img = \
-                    pipe(prompt=prompt, negative_prompt=negative_prompt, prompt_sd1_5=prompt,
+                    pipe(prompt=prompt_sdxl, negative_prompt=negative_prompt, prompt_sd1_5=prompt_sd1_5,
                             width=width_sdxl, height=height_sdxl, height_sd1_5=height_sd1_5, width_sd1_5=width_sd1_5,
                             source_img=source_image, image=control_image,
                             num_inference_steps=steps, guidance_scale=cfg,
@@ -259,7 +254,7 @@ class Diffusers_X_Adapter:
         else:
             for i in range(iter_num):
                 img = \
-                    pipe(prompt=prompt, negative_prompt=negative_prompt, prompt_sd1_5=prompt,
+                    pipe(prompt=prompt_sdxl, negative_prompt=negative_prompt, prompt_sd1_5=prompt_sd1_5,
                             width=width_sdxl, height=height_sdxl, height_sd1_5=height_sd1_5, width_sd1_5=width_sd1_5,
                             image=control_image,
                             num_inference_steps=steps, guidance_scale=cfg,
