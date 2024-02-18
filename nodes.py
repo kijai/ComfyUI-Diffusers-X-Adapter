@@ -24,7 +24,7 @@ import folder_paths
   
 script_directory = os.path.dirname(os.path.abspath(__file__))
 
-class X_Adapter:
+class Diffusers_X_Adapter:
     @classmethod
     def IS_CHANGED(s):
         return ""
@@ -47,8 +47,8 @@ class X_Adapter:
                
                 "width_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
                 "height_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
-                "width_sdxl": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
-                "height_sdxl": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
+                "width_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
+                "height_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
                 "prompt": ("STRING", {"multiline": True, "default": "positive",}),
                 "negative_prompt": ("STRING", {"multiline": True, "default": "negative",}),
                 "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
@@ -272,8 +272,8 @@ class X_Adapter:
         return (image_tensor,)
         
 NODE_CLASS_MAPPINGS = {
-    "X_Adapter": X_Adapter,
+    "Diffusers_X_Adapter": Diffusers_X_Adapter,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "X_Adapter": "X_Adapter",
+    "Diffusers_X_Adapter": "Diffusers_X_Adapter",
 }        
