@@ -73,6 +73,7 @@ class Diffusers_X_Adapter:
         dtype = torch.float16 if comfy.model_management.should_use_fp16() and not comfy.model_management.is_device_mps(device) else torch.float32
 
         control_image = image.permute(0, 3, 1, 2)
+        source_image = source_image.permute(0, 3, 1, 2)
 
         model_path_sd1_5 = folder_paths.get_full_path("checkpoints", sd_1_5_checkpoint)
         model_path_sdxl = folder_paths.get_full_path("checkpoints", sdxl_checkpoint)
