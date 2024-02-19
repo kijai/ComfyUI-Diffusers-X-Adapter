@@ -14,7 +14,9 @@ from .pipeline.pipeline_sd_xl_adapter_controlnet_img2img import StableDiffusionX
 from .pipeline.pipeline_sd_xl_adapter_controlnet import StableDiffusionXLAdapterControlnetPipeline
 from omegaconf import OmegaConf
 
-from .utils.single_file_utils import (create_scheduler_from_ldm, create_text_encoders_and_tokenizers_from_ldm, convert_ldm_vae_checkpoint, convert_ldm_unet_checkpoint, create_text_encoder_from_ldm_clip_checkpoint, create_vae_diffusers_config, create_unet_diffusers_config)
+from .utils.single_file_utils import (create_scheduler_from_ldm, create_text_encoders_and_tokenizers_from_ldm, convert_ldm_vae_checkpoint, 
+                                      convert_ldm_unet_checkpoint, create_text_encoder_from_ldm_clip_checkpoint, create_vae_diffusers_config, 
+                                      create_diffusers_controlnet_model_from_ldm, create_unet_diffusers_config)
 from safetensors import safe_open
 
 import comfy.model_management
@@ -43,16 +45,17 @@ class Diffusers_X_Adapter:
                 "width_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
                 "height_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
                 "prompt_sdxl": ("STRING", {"multiline": True, "default": "positive prompt sdxl",}),
-
-                "controlnet_name": (folder_paths.get_filename_list("controlnet"), ), 
-                
                 "negative_prompt": ("STRING", {"multiline": True, "default": "negative",}),
+                "controlnet_name": (folder_paths.get_filename_list("controlnet"), ), 
+                "guess_mode": ("BOOLEAN", {"default": False}),
+                "control_guidance_start": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "control_guidance_end": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "seed": ("INT", {"default": 123,"min": 0, "max": 0xffffffffffffffff, "step": 1}),
                 "steps": ("INT", {"default": 20, "min": 1, "max": 4096, "step": 1}),
                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.1, "max": 100.0, "step": 0.1}),
-                "controlnet_condition_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.1}),
-                "adapter_condition_scale": ("FLOAT", {"default": 1.2, "min": 0.0, "max": 10.0, "step": 0.1}),
-                "adapter_guidance_start": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 10.0, "step": 0.1}),
+                "controlnet_condition_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "adapter_condition_scale": ("FLOAT", {"default": 1.2, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "adapter_guidance_start": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "use_xformers": ("BOOLEAN", {"default": False}),
                 },
                 "optional": {
@@ -67,7 +70,7 @@ class Diffusers_X_Adapter:
 
     def load_checkpoint(self, image, prompt_sdxl, prompt_sd1_5, negative_prompt, use_xformers, sd_1_5_checkpoint, sdxl_checkpoint, 
                         controlnet_name, seed, steps, cfg, width_sd1_5, height_sd1_5, width_sdxl, height_sdxl,
-                        adapter_condition_scale, adapter_guidance_start, controlnet_condition_scale, source_image=None):
+                        adapter_condition_scale, adapter_guidance_start, controlnet_condition_scale, guess_mode, control_guidance_start, control_guidance_end, source_image=None):
         torch.manual_seed(seed)
         device = comfy.model_management.get_torch_device()    
         dtype = torch.float16 if comfy.model_management.should_use_fp16() and not comfy.model_management.is_device_mps(device) else torch.float32
@@ -81,6 +84,7 @@ class Diffusers_X_Adapter:
         controlnet_path = folder_paths.get_full_path("controlnet", controlnet_name)
         original_config = OmegaConf.load(os.path.join(script_directory, f"configs/v1-inference.yaml"))
         sdxl_original_config = OmegaConf.load(os.path.join(script_directory, f"configs/sd_xl_base.yaml"))
+        controlnet_original_config = OmegaConf.load(os.path.join(script_directory, f"configs/control_v11p_sd15.yaml"))
 
         if not hasattr(self, 'unet_sd1_5') or self.current_1_5_checkpoint != sd_1_5_checkpoint:
             print("Loading SD_1_5 checkpoint: ", sd_1_5_checkpoint)
@@ -123,7 +127,17 @@ class Diffusers_X_Adapter:
         if not hasattr(self, 'controlnet') or self.current_controlnet_checkpoint != controlnet_name:
             print("Loading controlnet: ", controlnet_name)
             self.current_controlnet_checkpoint = controlnet_name
-            self.controlnet = ControlNetModel.from_single_file(controlnet_path)
+            #self.controlnet = ControlNetModel.from_single_file(controlnet_path)
+            if controlnet_path.endswith(".safetensors"):
+                state_dict_controlnet = {}
+                with safe_open(controlnet_path, framework="pt", device="cpu") as f:
+                    for key in f.keys():
+                        state_dict_controlnet[key] = f.get_tensor(key)
+            else:
+                state_dict_controlnet = torch.load(controlnet_path, map_location="cpu")
+                while "state_dict" in state_dict_controlnet:
+                    state_dict_controlnet = state_dict_controlnet["state_dict"]
+            self.controlnet = create_diffusers_controlnet_model_from_ldm("ControlNet", controlnet_original_config, state_dict_controlnet)['controlnet']
             self.controlnet.to(dtype)
 
         # load Adapter_XL
@@ -252,7 +266,7 @@ class Diffusers_X_Adapter:
                             num_images_per_prompt=1, generator=gen,
                             controlnet_conditioning_scale=controlnet_condition_scale,
                             adapter_condition_scale=adapter_condition_scale,
-                            adapter_guidance_start=adapter_guidance_start).images[0]
+                            adapter_guidance_start=adapter_guidance_start, guess_mode=guess_mode, control_guidance_start=control_guidance_start, control_guidance_end=control_guidance_end).images[0]
         else:
             for i in range(iter_num):
                 img = \
@@ -263,9 +277,12 @@ class Diffusers_X_Adapter:
                             num_images_per_prompt=1, generator=gen,
                             controlnet_conditioning_scale=controlnet_condition_scale,
                             adapter_condition_scale=adapter_condition_scale,
-                            adapter_guidance_start=adapter_guidance_start).images[0]
-                        
-        image_tensor = transforms.ToTensor()(img).unsqueeze(0).permute(0, 2, 3, 1)
+                            adapter_guidance_start=adapter_guidance_start, guess_mode=guess_mode, control_guidance_start=control_guidance_start, control_guidance_end=control_guidance_end).images[0]
+        
+        image_tensor = (img - img.min()) / (img.max() - img.min())
+        image_tensor = image_tensor.unsqueeze(0).permute(0, 2, 3, 1)
+ 
+       
         return (image_tensor,)
         
 NODE_CLASS_MAPPINGS = {

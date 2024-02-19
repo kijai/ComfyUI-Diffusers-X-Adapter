@@ -856,7 +856,7 @@ def create_diffusers_controlnet_model_from_ldm(
     pipeline_class_name, original_config, checkpoint, upcast_attention=False, image_size=None
 ):
     # import here to avoid circular imports
-    from ..models import ControlNetModel
+    from diffusers.models import ControlNetModel
 
     image_size = set_image_size(pipeline_class_name, original_config, checkpoint, image_size=image_size)
 

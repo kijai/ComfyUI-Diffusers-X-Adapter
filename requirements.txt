@@ -2,7 +2,6 @@ accelerate >= 0.18.0
 diffusers >= 0.26.0
 einops >= 0.4.1
 huggingface_hub >= 0.17.2
-imageio == 2.26.0
 matplotlib
 numpy
 safetensors >= 0.3.3

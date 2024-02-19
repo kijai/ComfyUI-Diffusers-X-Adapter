@@ -25,7 +25,6 @@ from transformers import CLIPTextModel, CLIPTextModelWithProjection, CLIPTokeniz
 
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.loaders import FromSingleFileMixin, LoraLoaderMixin, TextualInversionLoaderMixin
-# from diffusers.models import AutoencoderKL, UNet2DConditionModel
 from diffusers.models import AutoencoderKL, ControlNetModel
 from ..xadapter.model.unet_adapter import UNet2DConditionModel
 
@@ -39,7 +38,6 @@ from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.utils import (
     is_accelerate_available,
     is_accelerate_version,
-    is_invisible_watermark_available,
     logging,
     replace_example_docstring,
 )
@@ -48,9 +46,6 @@ from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipelineOutput
 from ..xadapter.model.adapter import Adapter_XL
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
-
-if is_invisible_watermark_available():
-    from diffusers.pipelines.stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
 
 import comfy.utils
 
@@ -144,7 +139,6 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         adapter: Adapter_XL,
         controlnet: ControlNetModel,
         force_zeros_for_empty_prompt: bool = True,
-        add_watermarker: Optional[bool] = None,
     ):
         super().__init__()
 
@@ -173,14 +167,6 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
             vae_scale_factor=self.vae_scale_factor_sd1_5, do_convert_rgb=True, do_normalize=False
         )
         self.image_processor_sd1_5 = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor_sd1_5)
-
-        add_watermarker = add_watermarker if add_watermarker is not None else is_invisible_watermark_available()
-
-        if add_watermarker:
-            self.watermark = StableDiffusionXLWatermarker()
-        else:
-            self.watermark = None
-
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.enable_vae_slicing
     def enable_vae_slicing(self):
@@ -1204,12 +1190,6 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         else:
             image = latents
             return StableDiffusionXLPipelineOutput(images=image)
-
-        # apply watermark if available
-        if self.watermark is not None:
-            image = self.watermark.apply_watermark(image)
-
-        image = self.image_processor.postprocess(image, output_type=output_type)
 
         # Offload last model to CPU
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:

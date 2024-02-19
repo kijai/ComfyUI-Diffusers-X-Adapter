@@ -39,7 +39,6 @@ from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.utils import (
     is_accelerate_available,
     is_accelerate_version,
-    is_invisible_watermark_available,
     logging,
     replace_example_docstring,
 )
@@ -49,10 +48,9 @@ from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipelineOut
 from ..xadapter.model.adapter import Adapter_XL
 from diffusers.pipelines.controlnet.multicontrolnet import MultiControlNetModel
 
-if is_invisible_watermark_available():
-    from diffusers.pipelines.stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+
+import comfy.utils
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -142,7 +140,6 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
             adapter: Adapter_XL,
             controlnet: ControlNetModel,
             force_zeros_for_empty_prompt: bool = True,
-            add_watermarker: Optional[bool] = None,
     ):
         super().__init__()
 
@@ -171,13 +168,6 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
             vae_scale_factor=self.vae_scale_factor_sd1_5, do_convert_rgb=True, do_normalize=False
         )
         self.image_processor_sd1_5 = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor_sd1_5)
-
-        add_watermarker = add_watermarker if add_watermarker is not None else is_invisible_watermark_available()
-
-        if add_watermarker:
-            self.watermark = StableDiffusionXLWatermarker()
-        else:
-            self.watermark = None
 
     # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline.enable_vae_slicing
     def enable_vae_slicing(self):
@@ -983,7 +973,7 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
             controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
 
         latents_sd1_5_prior = latents_sd1_5.clone()
-
+        pbar = comfy.utils.ProgressBar(num_inference_steps_sd1_5)
         with self.progress_bar(total=num_inference_steps_sd1_5) as progress_bar:
             for i, t in enumerate(timesteps_sd1_5):
                 # expand the latents if we are doing classifier free guidance
@@ -1064,6 +1054,7 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
                 if i == len(timesteps_sd1_5) - 1 or (
                         (i + 1) > num_warmup_steps and (i + 1) % self.scheduler_sd1_5.order == 0):
                     progress_bar.update()
+                    pbar.update(1)
 
 
         add_noise = True if denoising_start is None else False
@@ -1081,7 +1072,7 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
                 for s, e in zip(control_guidance_start, control_guidance_end)
             ]
             controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
-
+        pbar = comfy.utils.ProgressBar(num_inference_steps_sd1_5)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
 
@@ -1223,6 +1214,7 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
+                    pbar.update(1)
                     if callback is not None and i % callback_steps == 0:
                         callback(i, t, latents)
 
@@ -1238,11 +1230,7 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
             image = latents
             return StableDiffusionXLPipelineOutput(images=image)
 
-        # apply watermark if available
-        #if self.watermark is not None:
-        #    image = self.watermark.apply_watermark(image)
-
-        image = self.image_processor.postprocess(image, output_type=output_type)
+        #image = self.image_processor.postprocess(image, output_type=output_type)
 
         # Offload last model to CPU
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
@@ -1915,17 +1903,10 @@ class StableDiffusionXLAdapterControlnetI2IPipeline(DiffusionPipeline, FromSingl
 
     def sd1_5_add_noise(self, init_latents, timestep, generator, device, dtype):
         shape = init_latents.shape
-        print("init_latents shape: ",shape)
         noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        print("noise shape: ",noise.shape)
         # get latents
-        print("timestep: ",timestep)
-        print("scheduler: ",type(self.scheduler))
-        print("scheduler config: ",self.scheduler.config)
         init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
-        print("noised init_latents shape: ",init_latents.shape)
         image = self.vae_sd1_5.decode(init_latents / self.vae_sd1_5.config.scaling_factor, return_dict=False)[0]
-        print(image.shape)
         do_denormalize = [True] * image.shape[0]
         image = self.image_processor_sd1_5.postprocess(image, output_type='pil', do_denormalize=do_denormalize)[0]
         #image.save(f'noisy_image_sd1_5_{int(timestep)}.jpg')
