@@ -1,6 +1,8 @@
 # ComfyUI wrapper node for X-Adapter diffusers implementation.
 
 This is meant for testing only, with the ability to use same models and python env as ComfyUI, it is NOT a proper ComfyUI implementation!
+![image](https://github.com/kijai/ComfyUI-Diffusers-X-Adapter/assets/40791699/bf9dc281-8f9f-43d3-99c5-3ba255ea69bf)
+![image](https://github.com/kijai/ComfyUI-Diffusers-X-Adapter/assets/40791699/530bb971-a8e5-4688-94d4-d7949dd56e1d)
 
 # X-Adapter
 
