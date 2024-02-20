@@ -66,7 +66,7 @@ class Diffusers_X_Adapter:
 
     FUNCTION = "load_checkpoint"
 
-    CATEGORY = "AD_MotionDirector"
+    CATEGORY = "Diffusers-X-Adapter"
 
     def load_checkpoint(self, image, prompt_sdxl, prompt_sd1_5, negative_prompt, use_xformers, sd_1_5_checkpoint, sdxl_checkpoint, 
                         controlnet_name, seed, steps, cfg, width_sd1_5, height_sd1_5, width_sdxl, height_sdxl,
