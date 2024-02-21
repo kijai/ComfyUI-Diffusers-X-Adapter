@@ -589,6 +589,14 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                 List[PIL.Image.Image],
                 List[np.ndarray],
             ] = None,
+        source_img: Union[
+                torch.FloatTensor,
+                PIL.Image.Image,
+                np.ndarray,
+                List[torch.FloatTensor],
+                List[PIL.Image.Image],
+                List[np.ndarray],
+            ] = None,
         num_inference_steps: int = 50,
         denoising_end: Optional[float] = None,
         guidance_scale: float = 5.0,
@@ -886,6 +894,7 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         self.scheduler_sd1_5.set_timesteps(num_inference_steps, device=device)
         timesteps_sd1_5 = self.scheduler_sd1_5.timesteps
         num_inference_steps_sd1_5 = num_inference_steps
+        latent_timestep_sd1_5 = timesteps_sd1_5[:1].repeat(batch_size * num_images_per_prompt)
 
         # self.scheduler.set_timesteps(num_inference_steps-skip_adapter_steps, device=device)
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -912,16 +921,28 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         )
 
         num_channels_latents_sd1_5 = self.unet_sd1_5.config.in_channels
-        latents_sd1_5 = self.prepare_latents_sd1_5(
-            batch_size * num_images_per_prompt,
-            num_channels_latents_sd1_5,
-            height_sd1_5,
-            width_sd1_5,
-            prompt_embeds_sd1_5.dtype,
-            device,
-            generator,
-            latents_sd1_5,
-        )
+        if source_img is not None:
+            source_img = self.image_processor_sd1_5.preprocess(source_img).to(dtype=torch.float32)
+            latents_sd1_5 = self.prepare_latents_img2img_sd1_5(
+                source_img,
+                latent_timestep_sd1_5,
+                batch_size,
+                num_images_per_prompt,
+                prompt_embeds_sd1_5.dtype,
+                device,
+                generator
+            )
+        else:
+            latents_sd1_5 = self.prepare_latents_sd1_5(
+                batch_size * num_images_per_prompt,
+                num_channels_latents_sd1_5,
+                height_sd1_5,
+                width_sd1_5,
+                prompt_embeds_sd1_5.dtype,
+                device,
+                generator,
+                latents_sd1_5
+            )
 
         # 6. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -1776,3 +1797,60 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
 
         return init_latents
 
+    def prepare_latents_img2img_sd1_5(self, image, timestep, batch_size, num_images_per_prompt, dtype, device, generator=None):
+        if not isinstance(image, (torch.Tensor, PIL.Image.Image, list)):
+            raise ValueError(
+                f"`image` has to be of type `torch.Tensor`, `PIL.Image.Image` or list but is {type(image)}"
+            )
+
+        image = image.to(device=device, dtype=dtype)
+
+        batch_size = batch_size * num_images_per_prompt
+
+        if image.shape[1] == 4:
+            init_latents = image
+
+        else:
+            if isinstance(generator, list) and len(generator) != batch_size:
+                raise ValueError(
+                    f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                    f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+                )
+
+            elif isinstance(generator, list):
+                init_latents = [
+                    self.vae_sd1_5.encode(image[i : i + 1]).latent_dist.sample(generator[i]) for i in range(batch_size)
+                ]
+                init_latents = torch.cat(init_latents, dim=0)
+            else:
+                init_latents = self.vae_sd1_5.encode(image).latent_dist.sample(generator)
+
+            init_latents = self.vae_sd1_5.config.scaling_factor * init_latents
+
+        if batch_size > init_latents.shape[0] and batch_size % init_latents.shape[0] == 0:
+            # expand init_latents for batch_size
+            deprecation_message = (
+                f"You have passed {batch_size} text prompts (`prompt`), but only {init_latents.shape[0]} initial"
+                " images (`image`). Initial images are now duplicating to match the number of text prompts. Note"
+                " that this behavior is deprecated and will be removed in a version 1.0.0. Please make sure to update"
+                " your script to pass as many initial images as text prompts to suppress this warning."
+            )
+            deprecate("len(prompt) != len(image)", "1.0.0", deprecation_message, standard_warn=False)
+            additional_image_per_prompt = batch_size // init_latents.shape[0]
+            init_latents = torch.cat([init_latents] * additional_image_per_prompt, dim=0)
+        elif batch_size > init_latents.shape[0] and batch_size % init_latents.shape[0] != 0:
+            raise ValueError(
+                f"Cannot duplicate `image` of batch size {init_latents.shape[0]} to {batch_size} text prompts."
+            )
+        else:
+            init_latents = torch.cat([init_latents], dim=0)
+
+        shape = init_latents.shape
+
+        noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+
+        # get latents
+        init_latents = self.scheduler_sd1_5.add_noise(init_latents, noise, timestep)
+        latents = init_latents
+
+        return latents
