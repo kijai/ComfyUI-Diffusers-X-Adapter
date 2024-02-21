@@ -205,7 +205,7 @@ class Diffusers_X_Adapter:
                         visited.append(item)
             else:
                 self.current_lora = None
-            del state_dict_sd1_5, converted_unet, converted_vae
+            del state_dict_sd1_5, converted_unet, converted_vae, state_dict_lora
 
         # load controlnet
         if not hasattr(self, 'controlnet') or self.current_controlnet_checkpoint != controlnet_name:
@@ -289,7 +289,7 @@ class Diffusers_X_Adapter:
                 self.unet_sdxl.enable_xformers_memory_efficient_attention()
                 self.controlnet.enable_xformers_memory_efficient_attention()
 
-            self.pipeline = StableDiffusionXLAdapterControlnetPipeline(
+        self.pipeline = StableDiffusionXLAdapterControlnetPipeline(
             vae=self.vae_sdxl,
             text_encoder=self.sdxl_text_encoder,
             text_encoder_2=self.sdxl_text_encoder2,
@@ -305,10 +305,10 @@ class Diffusers_X_Adapter:
             adapter=adapter,
             controlnet=self.controlnet)
 
-            self.pipeline.enable_model_cpu_offload()
+        self.pipeline.enable_model_cpu_offload()
 
-            self.pipeline.scheduler_sd1_5.config.timestep_spacing = "leading"
-            self.pipeline.unet.to(device=device, dtype=dtype)
+        self.pipeline.scheduler_sd1_5.config.timestep_spacing = "leading"
+        self.pipeline.unet.to(device=device, dtype=dtype)
 
         #run inference
         gen = Generator(device)
