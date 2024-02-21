@@ -92,6 +92,7 @@ class Diffusers_X_Adapter:
             self.current_lora = None
 
         if not hasattr(self, 'unet_sd1_5') or self.current_1_5_checkpoint != sd_1_5_checkpoint or self.current_lora != lora_checkpoint:
+            self.pipeline = None
             comfy.model_management.soft_empty_cache()
             print("Loading SD_1_5 checkpoint: ", sd_1_5_checkpoint)
             self.current_1_5_checkpoint = sd_1_5_checkpoint
@@ -209,6 +210,7 @@ class Diffusers_X_Adapter:
 
         # load controlnet
         if not hasattr(self, 'controlnet') or self.current_controlnet_checkpoint != controlnet_name:
+            self.pipeline = None
             print("Loading controlnet: ", controlnet_name)
             self.current_controlnet_checkpoint = controlnet_name
             #self.controlnet = ControlNetModel.from_single_file(controlnet_path)
@@ -242,6 +244,7 @@ class Diffusers_X_Adapter:
     
         # load SDXL
         if not hasattr(self, 'unet_sdxl') or self.current_sdxl_checkpoint != sdxl_checkpoint:
+            self.pipeline = None
             comfy.model_management.soft_empty_cache()
             print("Loading SDXL checkpoint: ", sdxl_checkpoint)
             self.current_sdxl_checkpoint = sdxl_checkpoint
