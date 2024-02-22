@@ -307,6 +307,11 @@ class Diffusers_X_Adapter:
             self.unet_sd1_5.enable_xformers_memory_efficient_attention()
             self.unet_sdxl.enable_xformers_memory_efficient_attention()
             self.controlnet.enable_xformers_memory_efficient_attention()
+        else:
+            self.unet_sd1_5.disable_xformers_memory_efficient_attention()
+            self.unet_sdxl.disable_xformers_memory_efficient_attention()
+            self.controlnet.disable_xformers_memory_efficient_attention()
+        
 
         self.pipeline = StableDiffusionXLAdapterControlnetPipeline(
             vae=self.vae_sdxl,
