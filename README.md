@@ -2,6 +2,11 @@
 
 This is meant for testing only, with the ability to use same models and python env as ComfyUI, it is NOT a proper ComfyUI implementation!
 
+Known limitations:
+  - As this is only a wrapper, it's not compatible with anything else in ComfyUI, besides input preprocessing and being able to load and convert most models for the Diffusers pipeline
+  - Only square aspect ratios seem to work, the ratio between 1.5 and SDXL resolution also has to be exactly 1:2
+  - Some ControlNets/LoRAs won't load, and results with some combos seem broken
+
 ![Screenshot from 2024-02-22 14-15-35](https://github.com/kijai/ComfyUI-Diffusers-X-Adapter/assets/40791699/8a101ed1-e00c-41d3-98bd-b5cf38dc6123)
 ![image](https://github.com/kijai/ComfyUI-Diffusers-X-Adapter/assets/40791699/bf9dc281-8f9f-43d3-99c5-3ba255ea69bf)
 ![image](https://github.com/kijai/ComfyUI-Diffusers-X-Adapter/assets/40791699/530bb971-a8e5-4688-94d4-d7949dd56e1d)
