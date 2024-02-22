@@ -1743,7 +1743,7 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         image = self.vae_sd1_5.decode(latent / self.vae_sd1_5.config.scaling_factor, return_dict=False)[0]
         do_denormalize = [True] * image.shape[0]
         image = self.image_processor_sd1_5.postprocess(image, output_type='pil', do_denormalize=do_denormalize)[0]
-        image = image.resize((height, width))
+        image = image.resize((width, height))
 
         if not isinstance(image, (torch.Tensor, PIL.Image.Image, list)):
             raise ValueError(

@@ -49,11 +49,13 @@ class Diffusers_X_Adapter:
                 "use_lora": ("BOOLEAN", {"default": False}),
                 "width_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
                 "height_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
+                "resolution_multiplier": ("INT", {"default": 2, "min": 2, "max": 2, "step": 1}),
                 "prompt_sd1_5": ("STRING", {"multiline": True, "default": "positive prompt sd1_5",}),
 
                 "sdxl_checkpoint": (folder_paths.get_filename_list("checkpoints"), ),
-                "width_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
-                "height_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
+                #"width_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
+                #"height_sdxl": ("INT", {"default": 1024, "min": 64, "max": 4096, "step": 8}),
+
                 "prompt_sdxl": ("STRING", {"multiline": True, "default": "positive prompt sdxl",}),
                 "negative_prompt": ("STRING", {"multiline": True, "default": "negative",}),
                 "controlnet_name": (folder_paths.get_filename_list("controlnet"), ), 
@@ -79,8 +81,8 @@ class Diffusers_X_Adapter:
 
     CATEGORY = "Diffusers-X-Adapter"
 
-    def load_checkpoint(self, prompt_sdxl, prompt_sd1_5, negative_prompt, use_xformers, sd_1_5_checkpoint, lora_checkpoint, use_lora, sdxl_checkpoint, 
-                        controlnet_name, seed, steps, cfg, width_sd1_5, height_sd1_5, width_sdxl, height_sdxl, 
+    def load_checkpoint(self, prompt_sdxl, prompt_sd1_5, negative_prompt, use_xformers, sd_1_5_checkpoint, lora_checkpoint, use_lora, sdxl_checkpoint, resolution_multiplier,
+                        controlnet_name, seed, steps, cfg, width_sd1_5, height_sd1_5, #width_sdxl, height_sdxl, 
                         adapter_condition_scale, adapter_guidance_start, controlnet_condition_scale, guess_mode, control_guidance_start, control_guidance_end, controlnet_image=None, latent_source_image=None):
         
         
@@ -331,6 +333,9 @@ class Diffusers_X_Adapter:
             control_image = controlnet_image.permute(0, 3, 1, 2)
         else:
             control_image = None
+
+        width_sdxl = resolution_multiplier * width_sd1_5
+        height_sdxl = resolution_multiplier * height_sd1_5
 
         #run inference
         gen = Generator(self.device)
