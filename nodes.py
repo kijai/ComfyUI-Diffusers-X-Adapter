@@ -49,6 +49,7 @@ class Diffusers_X_Adapter:
                 "use_lora": ("BOOLEAN", {"default": False}),
                 "width_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
                 "height_sd1_5": ("INT", {"default": 512, "min": 64, "max": 4096, "step": 8}),
+                "batch_size": ("INT", {"default": 1, "min": 1, "max": 100, "step": 1}),
                 "resolution_multiplier": ("INT", {"default": 2, "min": 2, "max": 2, "step": 1}),
                 "prompt_sd1_5": ("STRING", {"multiline": True, "default": "positive prompt sd1_5",}),
 
@@ -66,7 +67,7 @@ class Diffusers_X_Adapter:
                 "steps": ("INT", {"default": 20, "min": 1, "max": 4096, "step": 1}),
                 "cfg": ("FLOAT", {"default": 8.0, "min": 0.1, "max": 100.0, "step": 0.1}),
                 "controlnet_condition_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
-                "adapter_condition_scale": ("FLOAT", {"default": 1.2, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "adapter_condition_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "adapter_guidance_start": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "use_xformers": ("BOOLEAN", {"default": False}),
                 },
@@ -82,7 +83,7 @@ class Diffusers_X_Adapter:
     CATEGORY = "Diffusers-X-Adapter"
 
     def load_checkpoint(self, prompt_sdxl, prompt_sd1_5, negative_prompt, use_xformers, sd_1_5_checkpoint, lora_checkpoint, use_lora, sdxl_checkpoint, resolution_multiplier,
-                        controlnet_name, seed, steps, cfg, width_sd1_5, height_sd1_5, #width_sdxl, height_sdxl, 
+                        controlnet_name, seed, steps, cfg, width_sd1_5, height_sd1_5, batch_size, #width_sdxl, height_sdxl, 
                         adapter_condition_scale, adapter_guidance_start, controlnet_condition_scale, guess_mode, control_guidance_start, control_guidance_end, controlnet_image=None, latent_source_image=None):
         
         
@@ -214,7 +215,7 @@ class Diffusers_X_Adapter:
                     for item in pair_keys:
                         visited.append(item)
 
-                del state_dict_lora
+                del state_dict_lora, visited, pair_keys
 
             else:
                 self.current_lora = None
@@ -301,11 +302,11 @@ class Diffusers_X_Adapter:
 
             del state_dict_sdxl, converted_unet, converted_sdxl_stuff, converted_vae
 
-            #xformers
-            if use_xformers:
-                self.unet_sd1_5.enable_xformers_memory_efficient_attention()
-                self.unet_sdxl.enable_xformers_memory_efficient_attention()
-                self.controlnet.enable_xformers_memory_efficient_attention()
+        #xformers
+        if use_xformers:
+            self.unet_sd1_5.enable_xformers_memory_efficient_attention()
+            self.unet_sdxl.enable_xformers_memory_efficient_attention()
+            self.controlnet.enable_xformers_memory_efficient_attention()
 
         self.pipeline = StableDiffusionXLAdapterControlnetPipeline(
             vae=self.vae_sdxl,
@@ -346,10 +347,11 @@ class Diffusers_X_Adapter:
                     width=width_sdxl, height=height_sdxl, height_sd1_5=height_sd1_5, width_sd1_5=width_sd1_5,
                     image=control_image,
                     num_inference_steps=steps, guidance_scale=cfg,
-                    num_images_per_prompt=1, generator=gen,
+                    num_images_per_prompt=batch_size, generator=gen,
                     controlnet_conditioning_scale=controlnet_condition_scale,
                     adapter_condition_scale=adapter_condition_scale,
-                    adapter_guidance_start=adapter_guidance_start, guess_mode=guess_mode, control_guidance_start=control_guidance_start, control_guidance_end=control_guidance_end, source_img=latent_source_image).images[0]
+                    adapter_guidance_start=adapter_guidance_start, guess_mode=guess_mode, control_guidance_start=control_guidance_start, 
+                    control_guidance_end=control_guidance_end, source_img=latent_source_image).images
         
         image_tensor = (img - img.min()) / (img.max() - img.min())
         if image_tensor.dim() ==  3:
