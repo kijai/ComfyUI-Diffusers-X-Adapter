@@ -137,7 +137,8 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         unet_sd1_5: UNet2DConditionModel,
         scheduler_sd1_5: KarrasDiffusionSchedulers,
         adapter: Adapter_XL,
-        controlnet: ControlNetModel,
+        controlnet: Optional[ControlNetModel] = None,
+
         force_zeros_for_empty_prompt: bool = True,
     ):
         super().__init__()
@@ -225,7 +226,9 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         model_sequence.extend([self.unet, self.vae])
 
         model_sequence.extend([self.unet_sd1_5, self.vae_sd1_5, self.text_encoder_sd1_5])
-        model_sequence.extend([self.controlnet, self.adapter])
+        if isinstance(self.controlnet, ControlNetModel):
+            model_sequence.extend([self.controlnet])
+        model_sequence.extend([self.adapter])
 
         hook = None
         for cpu_offloaded_model in model_sequence:
@@ -805,12 +808,13 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         if isinstance(controlnet, MultiControlNetModel) and isinstance(controlnet_conditioning_scale, float):
             controlnet_conditioning_scale = [controlnet_conditioning_scale] * len(controlnet.nets)
 
-        global_pool_conditions = (
-            controlnet.config.global_pool_conditions
-            if isinstance(controlnet, ControlNetModel)
-            else controlnet.nets[0].config.global_pool_conditions
-        )
-        guess_mode = guess_mode or global_pool_conditions
+        if isinstance(self.controlnet, ControlNetModel):
+            global_pool_conditions = (
+                controlnet.config.global_pool_conditions
+                if isinstance(controlnet, ControlNetModel)
+                else controlnet.nets[0].config.global_pool_conditions
+            )
+            guess_mode = guess_mode or global_pool_conditions
 
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
@@ -851,8 +855,8 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
 
             image = images
             height_sd1_5, width_sd1_5 = image[0].shape[-2:]
-        else:
-            assert False
+        #else:
+        #    assert False
 
         # 3. Encode input prompt
         text_encoder_lora_scale = (
@@ -976,13 +980,14 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
             num_inference_steps = len(list(filter(lambda ts: ts >= discrete_timestep_cutoff, timesteps)))
             timesteps = timesteps[:num_inference_steps]
 
-        controlnet_keep = []
-        for i in range(len(timesteps_sd1_5)):
-            keeps = [
-                1.0 - float(i / len(timesteps_sd1_5) < s or (i + 1) / len(timesteps_sd1_5) > e)
-                for s, e in zip(control_guidance_start, control_guidance_end)
-            ]
-            controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
+        if isinstance(controlnet, ControlNetModel):
+            controlnet_keep = []
+            for i in range(len(timesteps_sd1_5)):
+                keeps = [
+                    1.0 - float(i / len(timesteps_sd1_5) < s or (i + 1) / len(timesteps_sd1_5) > e)
+                    for s, e in zip(control_guidance_start, control_guidance_end)
+                ]
+                controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
 
         latents_sd1_5_prior = latents_sd1_5.clone()
         pbar = comfy.utils.ProgressBar(num_inference_steps_sd1_5)
@@ -995,52 +1000,63 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                 latent_model_input = self.scheduler_sd1_5.scale_model_input(latent_model_input, t_sd1_5)
 
                 # Controlnet inference
-                if guess_mode and do_classifier_free_guidance:
-                    # Infer ControlNet only for the conditional batch.
-                    control_model_input = latents_sd1_5_prior
-                    control_model_input = self.scheduler_sd1_5.scale_model_input(control_model_input, t_sd1_5)
-                    controlnet_prompt_embeds = prompt_embeds_sd1_5.chunk(2)[1]
+                if isinstance(controlnet, ControlNetModel):
+                    if guess_mode and do_classifier_free_guidance:
+                        # Infer ControlNet only for the conditional batch.
+                        control_model_input = latents_sd1_5_prior
+                        control_model_input = self.scheduler_sd1_5.scale_model_input(control_model_input, t_sd1_5)
+                        controlnet_prompt_embeds = prompt_embeds_sd1_5.chunk(2)[1]
+                    else:
+                        control_model_input = latent_model_input
+                        controlnet_prompt_embeds = prompt_embeds_sd1_5
+
+                    if isinstance(controlnet_keep[i], list):
+                        cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
+                    else:
+                        controlnet_cond_scale = controlnet_conditioning_scale
+                        if isinstance(controlnet_cond_scale, list):
+                            controlnet_cond_scale = controlnet_cond_scale[0]
+                        cond_scale = controlnet_cond_scale * controlnet_keep[i]
+
+                    down_block_res_samples, mid_block_res_sample = self.controlnet(
+                        control_model_input,
+                        t_sd1_5,
+                        encoder_hidden_states=controlnet_prompt_embeds,
+                        controlnet_cond=image,
+                        conditioning_scale=cond_scale,
+                        guess_mode=guess_mode,
+                        return_dict=False,
+                    )
+
+                    if guess_mode and do_classifier_free_guidance:
+                        # Infered ControlNet only for the conditional batch.
+                        # To apply the output of ControlNet to both the unconditional and conditional batches,
+                        # add 0 to the unconditional batch to keep it unchanged.
+                        down_block_res_samples = [torch.cat([torch.zeros_like(d), d]) for d in down_block_res_samples]
+                        mid_block_res_sample = torch.cat([torch.zeros_like(mid_block_res_sample), mid_block_res_sample])
+
+                    # predict the noise residual
+                    unet_output = self.unet_sd1_5(
+                        latent_model_input,
+                        t_sd1_5,
+                        encoder_hidden_states=prompt_embeds_sd1_5,
+                        cross_attention_kwargs=cross_attention_kwargs,
+                        down_block_additional_residuals=down_block_res_samples,
+                        mid_block_additional_residual=mid_block_res_sample,
+                        return_hidden_states=False
+                    )
+                    hidden_states = unet_output.hidden_states
                 else:
-                    control_model_input = latent_model_input
-                    controlnet_prompt_embeds = prompt_embeds_sd1_5
-
-                if isinstance(controlnet_keep[i], list):
-                    cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
-                else:
-                    controlnet_cond_scale = controlnet_conditioning_scale
-                    if isinstance(controlnet_cond_scale, list):
-                        controlnet_cond_scale = controlnet_cond_scale[0]
-                    cond_scale = controlnet_cond_scale * controlnet_keep[i]
-
-                down_block_res_samples, mid_block_res_sample = self.controlnet(
-                    control_model_input,
-                    t_sd1_5,
-                    encoder_hidden_states=controlnet_prompt_embeds,
-                    controlnet_cond=image,
-                    conditioning_scale=cond_scale,
-                    guess_mode=guess_mode,
-                    return_dict=False,
-                )
-
-                if guess_mode and do_classifier_free_guidance:
-                    # Infered ControlNet only for the conditional batch.
-                    # To apply the output of ControlNet to both the unconditional and conditional batches,
-                    # add 0 to the unconditional batch to keep it unchanged.
-                    down_block_res_samples = [torch.cat([torch.zeros_like(d), d]) for d in down_block_res_samples]
-                    mid_block_res_sample = torch.cat([torch.zeros_like(mid_block_res_sample), mid_block_res_sample])
-
-                # predict the noise residual
-                unet_output = self.unet_sd1_5(
+                    # predict the noise residual
+                    unet_output = self.unet_sd1_5(
                     latent_model_input,
                     t_sd1_5,
                     encoder_hidden_states=prompt_embeds_sd1_5,
                     cross_attention_kwargs=cross_attention_kwargs,
-                    down_block_additional_residuals=down_block_res_samples,
-                    mid_block_additional_residual=mid_block_res_sample,
                     return_hidden_states=False
-                )
+                    )
+
                 noise_pred = unet_output.sample
-                hidden_states = unet_output.hidden_states
 
                 # perform guidance
                 if do_classifier_free_guidance:
@@ -1067,14 +1083,14 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                         num_images_per_prompt, height, width, prompt_embeds.dtype, device, generator=generator, add_noise=add_noise)
         latents_sd1_5 = self.sd1_5_add_noise(latents_sd1_5_prior, latent_timestep, generator, device, prompt_embeds.dtype)
 
-
-        controlnet_keep = []
-        for i in range(len(timesteps)):
-            keeps = [
-                1.0 - float(i / len(timesteps_sd1_5) < s or (i + 1) / len(timesteps_sd1_5) > e)
-                for s, e in zip(control_guidance_start, control_guidance_end)
-            ]
-            controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
+        if isinstance(controlnet, ControlNetModel):
+            controlnet_keep = []
+            for i in range(len(timesteps)):
+                keeps = [
+                    1.0 - float(i / len(timesteps_sd1_5) < s or (i + 1) / len(timesteps_sd1_5) > e)
+                    for s, e in zip(control_guidance_start, control_guidance_end)
+                ]
+                controlnet_keep.append(keeps[0] if isinstance(controlnet, ControlNetModel) else keeps)
         pbar = comfy.utils.ProgressBar(num_inference_steps)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -1085,51 +1101,61 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                 latent_model_input = self.scheduler_sd1_5.scale_model_input(latent_model_input, t_sd1_5)
 
                 # Controlnet inference
-                if guess_mode and do_classifier_free_guidance:
-                    # Infer ControlNet only for the conditional batch.
-                    control_model_input = latents_sd1_5
-                    control_model_input = self.scheduler_sd1_5.scale_model_input(control_model_input, t_sd1_5)
-                    controlnet_prompt_embeds = prompt_embeds_sd1_5.chunk(2)[1]
+                if isinstance(controlnet, ControlNetModel):
+                    if guess_mode and do_classifier_free_guidance:
+                        # Infer ControlNet only for the conditional batch.
+                        control_model_input = latents_sd1_5
+                        control_model_input = self.scheduler_sd1_5.scale_model_input(control_model_input, t_sd1_5)
+                        controlnet_prompt_embeds = prompt_embeds_sd1_5.chunk(2)[1]
+                    else:
+                        control_model_input = latent_model_input
+                        controlnet_prompt_embeds = prompt_embeds_sd1_5
+
+                    if isinstance(controlnet_keep[i], list):
+                        cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
+                    else:
+                        controlnet_cond_scale = controlnet_conditioning_scale
+                        if isinstance(controlnet_cond_scale, list):
+                            controlnet_cond_scale = controlnet_cond_scale[0]
+                        cond_scale = controlnet_cond_scale * controlnet_keep[i]
+
+                    down_block_res_samples, mid_block_res_sample = self.controlnet(
+                        control_model_input,
+                        t_sd1_5,
+                        encoder_hidden_states=controlnet_prompt_embeds,
+                        controlnet_cond=image,
+                        conditioning_scale=cond_scale,
+                        guess_mode=guess_mode,
+                        return_dict=False,
+                    )
+
+                    if guess_mode and do_classifier_free_guidance:
+                        # Infered ControlNet only for the conditional batch.
+                        # To apply the output of ControlNet to both the unconditional and conditional batches,
+                        # add 0 to the unconditional batch to keep it unchanged.
+                        down_block_res_samples = [torch.cat([torch.zeros_like(d), d]) for d in down_block_res_samples]
+                        mid_block_res_sample = torch.cat([torch.zeros_like(mid_block_res_sample), mid_block_res_sample])
+
+                    # predict the noise residual
+                    unet_output = self.unet_sd1_5(
+                        latent_model_input,
+                        t_sd1_5,
+                        encoder_hidden_states=prompt_embeds_sd1_5,
+                        cross_attention_kwargs=cross_attention_kwargs,
+                        down_block_additional_residuals=down_block_res_samples,
+                        mid_block_additional_residual=mid_block_res_sample,
+                        return_hidden_states=True,
+                        return_encoder_feature=True
+                    )
                 else:
-                    control_model_input = latent_model_input
-                    controlnet_prompt_embeds = prompt_embeds_sd1_5
-
-                if isinstance(controlnet_keep[i], list):
-                    cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
-                else:
-                    controlnet_cond_scale = controlnet_conditioning_scale
-                    if isinstance(controlnet_cond_scale, list):
-                        controlnet_cond_scale = controlnet_cond_scale[0]
-                    cond_scale = controlnet_cond_scale * controlnet_keep[i]
-
-                down_block_res_samples, mid_block_res_sample = self.controlnet(
-                    control_model_input,
-                    t_sd1_5,
-                    encoder_hidden_states=controlnet_prompt_embeds,
-                    controlnet_cond=image,
-                    conditioning_scale=cond_scale,
-                    guess_mode=guess_mode,
-                    return_dict=False,
-                )
-
-                if guess_mode and do_classifier_free_guidance:
-                    # Infered ControlNet only for the conditional batch.
-                    # To apply the output of ControlNet to both the unconditional and conditional batches,
-                    # add 0 to the unconditional batch to keep it unchanged.
-                    down_block_res_samples = [torch.cat([torch.zeros_like(d), d]) for d in down_block_res_samples]
-                    mid_block_res_sample = torch.cat([torch.zeros_like(mid_block_res_sample), mid_block_res_sample])
-
-                # predict the noise residual
-                unet_output = self.unet_sd1_5(
-                    latent_model_input,
-                    t_sd1_5,
-                    encoder_hidden_states=prompt_embeds_sd1_5,
-                    cross_attention_kwargs=cross_attention_kwargs,
-                    down_block_additional_residuals=down_block_res_samples,
-                    mid_block_additional_residual=mid_block_res_sample,
-                    return_hidden_states=True,
-                    return_encoder_feature=True
-                )
+                    unet_output = self.unet_sd1_5(
+                        latent_model_input,
+                        t_sd1_5,
+                        encoder_hidden_states=prompt_embeds_sd1_5,
+                        cross_attention_kwargs=cross_attention_kwargs,
+                        return_hidden_states=True,
+                        return_encoder_feature=True
+                    )
                 noise_pred = unet_output.sample
                 hidden_states = unet_output.hidden_states
 
@@ -1164,20 +1190,32 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                     # predict the noise residual
                     added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
                     
-                    noise_pred = self.unet(
-                            latent_model_input,
-                            t,
-                            encoder_hidden_states=prompt_embeds,
-                            cross_attention_kwargs=cross_attention_kwargs,
-                            added_cond_kwargs=added_cond_kwargs,
-                            up_block_additional_residual=up_block_additional_residual,
-                            down_bridge_residuals=down_bridge_residuals,
-                            return_dict=False,
-                            fusion_guidance_scale=fusion_guidance_scale,
-                            fusion_type='ADD',
-                            adapter=None
-                        )[0]
-
+                    if isinstance(controlnet, ControlNetModel):
+                        noise_pred = self.unet(
+                                latent_model_input,
+                                t,
+                                encoder_hidden_states=prompt_embeds,
+                                cross_attention_kwargs=cross_attention_kwargs,
+                                added_cond_kwargs=added_cond_kwargs,
+                                up_block_additional_residual=up_block_additional_residual,
+                                down_bridge_residuals=down_bridge_residuals,
+                                return_dict=False,
+                                fusion_guidance_scale=fusion_guidance_scale,
+                                fusion_type='ADD',
+                                adapter=None
+                            )[0]
+                    else:
+                        noise_pred = self.unet(
+                                latent_model_input,
+                                t,
+                                encoder_hidden_states=prompt_embeds,
+                                cross_attention_kwargs=cross_attention_kwargs,
+                                added_cond_kwargs=added_cond_kwargs,
+                                up_block_additional_residual=up_block_additional_residual,
+                                down_bridge_residuals=down_bridge_residuals,
+                                return_dict=False,
+                                fusion_guidance_scale=fusion_guidance_scale
+                            )[0]
 
                     # perform guidance
                     if do_classifier_free_guidance:
@@ -1549,6 +1587,11 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
 
             for image_ in image:
                 self.check_image(image_, prompt, prompt_embeds)
+
+        elif not isinstance(self.controlnet, ControlNetModel):
+            logger.warning(
+                    "No ControlNet loaded."
+                )
         else:
             assert False
 
@@ -1574,6 +1617,10 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                 raise ValueError(
                     "For multiple controlnets: When `controlnet_conditioning_scale` is specified as `list`, it must have"
                     " the same length as the number of controlnets"
+                )
+        elif not isinstance(self.controlnet, ControlNetModel):
+            logger.warning(
+                    "No ControlNet loaded."
                 )
         else:
             assert False
