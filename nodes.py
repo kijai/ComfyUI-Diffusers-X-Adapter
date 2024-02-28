@@ -76,7 +76,7 @@ class Diffusers_X_Adapter:
                 "latent_source_image" : ("IMAGE",),
                 },             
             }
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE",) * 4
 
     FUNCTION = "load_checkpoint"
 
@@ -346,9 +346,8 @@ class Diffusers_X_Adapter:
         #run inference
         gen = Generator(self.device)
         gen.manual_seed(seed)
-    
-        img = \
-            self.pipeline(prompt=prompt_sdxl, negative_prompt=negative_prompt, prompt_sd1_5=prompt_sd1_5,
+
+        output = self.pipeline(prompt=prompt_sdxl, negative_prompt=negative_prompt, prompt_sd1_5=prompt_sd1_5,
                     width=width_sdxl, height=height_sdxl, height_sd1_5=height_sd1_5, width_sd1_5=width_sd1_5,
                     image=control_image,
                     num_inference_steps=steps, guidance_scale=cfg,
@@ -356,15 +355,18 @@ class Diffusers_X_Adapter:
                     controlnet_conditioning_scale=controlnet_condition_scale,
                     adapter_condition_scale=adapter_condition_scale,
                     adapter_guidance_start=adapter_guidance_start, guess_mode=guess_mode, control_guidance_start=control_guidance_start, 
-                    control_guidance_end=control_guidance_end, source_img=latent_source_image).images
+                    control_guidance_end=control_guidance_end, source_img=latent_source_image)
+        imgs = output.images
         
-        image_tensor = (img - img.min()) / (img.max() - img.min())
-        if image_tensor.dim() ==  3:
-            image_tensor = image_tensor.unsqueeze(0)
-        image_tensor = image_tensor.permute(0,  2,  3,  1)
- 
-        return (image_tensor,)
-        
+        def postprocess(img):
+            image_tensor = (img - img.min()) / (img.max() - img.min())
+            if image_tensor.dim() ==  3:
+                image_tensor = image_tensor.unsqueeze(0)
+            image_tensor = image_tensor.permute(0,  2,  3,  1)
+            return image_tensor
+
+        return tuple(postprocess(img) for img in imgs)
+
 NODE_CLASS_MAPPINGS = {
     "Diffusers_X_Adapter": Diffusers_X_Adapter,
 }
