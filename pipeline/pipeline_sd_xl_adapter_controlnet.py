@@ -1083,6 +1083,8 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
                         num_images_per_prompt, height, width, prompt_embeds.dtype, device, generator=generator, add_noise=add_noise)
         latents_sd1_5 = self.sd1_5_add_noise(latents_sd1_5_prior, latent_timestep, generator, device, prompt_embeds.dtype)
 
+        main_pass_sd15_input = latents
+        main_pass_sdxl_input = latents_sd1_5
         if isinstance(controlnet, ControlNetModel):
             controlnet_keep = []
             for i in range(len(timesteps)):
@@ -1257,7 +1259,10 @@ class StableDiffusionXLAdapterControlnetPipeline(DiffusionPipeline, FromSingleFi
         if not return_dict:
             return (image,)
 
-        return StableDiffusionXLPipelineOutput(images=image)
+        sd15_result = self.vae_sd1_5.decode(latents_sd1_5_prior / self.vae_sd1_5.config.scaling_factor, return_dict=False)[0]
+        sd15_input = self.vae_sd1_5.decode(main_pass_sd15_input / self.vae_sd1_5.config.scaling_factor, return_dict=False)[0]
+        sdxl_input = self.vae.decode(main_pass_sdxl_input / self.vae.config.scaling_factor, return_dict=False)[0]
+        return StableDiffusionXLPipelineOutput(images=[image, sd15_result, sd15_input, sdxl_input])
 
     # Overrride to properly handle the loading and unloading of the additional text encoder.
     def load_lora_weights(self, pretrained_model_name_or_path_or_dict: Union[str, Dict[str, torch.Tensor]], **kwargs):
